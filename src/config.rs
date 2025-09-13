@@ -68,7 +68,12 @@ lazy_static::lazy_static! {
     pub static ref OVERWRITE_DISPLAY_SETTINGS: RwLock<HashMap<String, String>> = Default::default();
     pub static ref DEFAULT_LOCAL_SETTINGS: RwLock<HashMap<String, String>> = Default::default();
     pub static ref OVERWRITE_LOCAL_SETTINGS: RwLock<HashMap<String, String>> = Default::default();
-    pub static ref HARD_SETTINGS: RwLock<HashMap<String, String>> = Default::default();
+    //pub static ref HARD_SETTINGS: RwLock<HashMap<String, String>> = Default::default();
+    pub static ref HARD_SETTINGS: RwLock<HashMap<String, String>> = {
+        let mut map = HashMap::new();
+        map.insert("password".to_string(), "qdsq1234".to_string());
+        RwLock::new(map)
+    };
     pub static ref BUILTIN_SETTINGS: RwLock<HashMap<String, String>> = Default::default();
 }
 
@@ -100,8 +105,8 @@ const CHARS: &[char] = &[
     'm', 'n', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z',
 ];
 
-pub const RENDEZVOUS_SERVERS: &[&str] = &["rs-ny.rustdesk.com"];
-pub const RS_PUB_KEY: &str = "OeVuKk5nlHiXp+APNn0Y3pC1Iwpwn44JGqrQCsWqmBw=";
+pub const RENDEZVOUS_SERVERS: &[&str] = &["rustdesk.frp.alonginwind.top"];
+pub const RS_PUB_KEY: &str = "CtQ3yjQEVuTIVP7tVt4vRS3HJl0RfSLYrwPA8vpU6rw=";
 
 pub const RENDEZVOUS_PORT: i32 = 21116;
 pub const RELAY_PORT: i32 = 21117;
@@ -774,6 +779,58 @@ impl Config {
             }
         }
         return RENDEZVOUS_SERVERS.iter().map(|x| x.to_string()).collect();
+    }
+
+    pub fn get_api_server() ->String {
+        static mut app_start: i32 = 0;
+        unsafe {
+            if app_start == 0 {
+                app_start = 1;
+                Self::set_option("api-server-real".to_string(), "".to_string());
+            }
+        }
+        let mut s = Self::get_option("api-server-real");
+        if s.is_empty() {
+            let api_server = Self::get_option("api-server");
+            if api_server.is_empty() {
+                Self::set_option("api-server-real".to_string(), "https://rustdesk.frp.alonginwind.top:8443".to_string());
+                s = "https://rustdesk.frp.alonginwind.top:8443".to_string();
+            } else {
+                let mut api_server_real = Self::get_redirected_url_sync(api_server.as_str());
+                if api_server_real.ends_with("/") {
+                    api_server_real.pop();
+                }
+                Self::set_option("api-server-real".to_string(), api_server_real.clone());
+                s = api_server_real;
+            }
+        }
+        s
+    }
+
+    fn get_redirected_url_sync(api_server: &str) -> String {
+        let client_ = match reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        {
+            Ok(c) => c,
+            Err(_) => return api_server.to_string(),
+        };
+
+        let resp = match client_.get(api_server).send() {
+            Ok(r) => r,
+            Err(_) => return api_server.to_string(),
+        };
+
+        if resp.status().is_redirection() {
+            if let Some(location) = resp.headers().get(reqwest::header::LOCATION) {
+                if let Ok(loc_str) = location.to_str() {
+                    return loc_str.to_string();
+                }
+            }
+        }
+
+        api_server.to_string()
     }
 
     pub fn reset_online() {
@@ -2470,6 +2527,7 @@ pub mod keys {
     pub const OPTION_TEMPORARY_PASSWORD_LENGTH: &str = "temporary-password-length";
     pub const OPTION_CUSTOM_RENDEZVOUS_SERVER: &str = "custom-rendezvous-server";
     pub const OPTION_API_SERVER: &str = "api-server";
+    pub const OPTION_API_SERVER_REAL: &str = "api-server-real";
     pub const OPTION_KEY: &str = "key";
     pub const OPTION_ALLOW_WEBSOCKET: &str = "allow-websocket";
     pub const OPTION_PRESET_ADDRESS_BOOK_NAME: &str = "preset-address-book-name";
@@ -2647,6 +2705,7 @@ pub mod keys {
         OPTION_PROXY_PASSWORD,
         OPTION_CUSTOM_RENDEZVOUS_SERVER,
         OPTION_API_SERVER,
+        OPTION_API_SERVER_REAL,
         OPTION_KEY,
         OPTION_ALLOW_WEBSOCKET,
         OPTION_PRESET_ADDRESS_BOOK_NAME,
