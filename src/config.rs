@@ -803,7 +803,8 @@ impl Config {
             } else if api_server.ends_with(|c: char| c.is_ascii_digit()) {
                 s = api_server;
             } else {
-                let mut api_server_real = Self::get_redirected_url_sync(api_server.as_str());
+                let api_server_ = api_server + "/";
+                let mut api_server_real = Self::get_redirected_url_sync(api_server_.as_str());
                 if api_server_real.ends_with("/") {
                     api_server_real.pop();
                 }

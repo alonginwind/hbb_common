@@ -323,7 +323,11 @@ pub fn check_ws(endpoint: &str) -> String {
         let ws_port = split_host_port(&api_https_server)
             .map(|(_, p)| p)
             .unwrap_or(443);
-        (format!("{}:{}{}", ws_host, ws_port, domain_path), true)
+        if relay {
+            (format!("{}:{}{}", endpoint_host, ws_port, domain_path), true)
+        } else {
+            (format!("{}:{}{}", ws_host, ws_port, domain_path), true)
+        }
     };
     let protocol = if is_domain {
         if api_server.starts_with("https") {
