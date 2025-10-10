@@ -105,7 +105,7 @@ const CHARS: &[char] = &[
     'm', 'n', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z',
 ];
 
-pub const RENDEZVOUS_SERVERS: &[&str] = &["rustdesk.frp.alonginwind.top"];
+pub const RENDEZVOUS_SERVERS: &[&str] = &["rustdesk.shuangqingtech.com"];
 pub const RS_PUB_KEY: &str = "CtQ3yjQEVuTIVP7tVt4vRS3HJl0RfSLYrwPA8vpU6rw=";
 
 pub const RENDEZVOUS_PORT: i32 = 21116;
@@ -798,8 +798,8 @@ impl Config {
                 api_server.pop();
             }
             if api_server.is_empty() {
-                Self::set_option("api-server-real".to_string(), "https://rustdesk.frp.alonginwind.top:8443".to_string());
-                s = "https://rustdesk.frp.alonginwind.top:8443".to_string();
+                Self::set_option("api-server-real".to_string(), "https://rustdesk.shuangqingtech.com:8443".to_string());
+                s = "https://rustdesk.shuangqingtech.com:8443".to_string();
             } else if api_server.ends_with(|c: char| c.is_ascii_digit()) {
                 s = api_server;
             } else {
