@@ -196,15 +196,45 @@ pub fn ipv4_to_ipv6(addr: String, ipv4: bool) -> String {
 }
 
 async fn test_target(target: &str) -> ResultType<SocketAddr> {
-    if let Ok(Ok(s)) = super::timeout(1000, tokio::net::TcpStream::connect(target)).await {
-        if let Ok(addr) = s.peer_addr() {
-            return Ok(addr);
+    //if let Ok(Ok(s)) = super::timeout(1000, tokio::net::TcpStream::connect(target)).await {
+    //    if let Ok(addr) = s.peer_addr() {
+    //        return Ok(addr);
+    //    }
+    //}
+    //tokio::net::lookup_host(target)
+    //    .await?
+    //    .next()
+    //    .context(format!("Failed to look up host for {target}"))
+
+    // 先把 host 和 port 分离
+    let mut parts = target.split(':');
+    let host = parts.next().context("No host in target")?;
+    let port: u16 = parts
+        .next()
+        .context("No port in target")?
+        .parse()
+        .context("Invalid port")?;
+
+    // DNS 解析 host
+    let mut addrs: Vec<SocketAddr> = tokio::net::lookup_host((host, port))
+        .await?
+        .collect();
+
+    // 优先 IPv4
+    addrs.sort_by_key(|a| if a.is_ipv4() { 0 } else { 1 });
+
+    // 尝试连接每个地址
+    for addr in addrs {
+        if let Ok(Ok(stream)) =
+            super::timeout(1000, tokio::net::TcpStream::connect(addr)).await
+        {
+            if let Ok(peer) = stream.peer_addr() {
+                return Ok(peer);
+            }
         }
     }
-    tokio::net::lookup_host(target)
-        .await?
-        .next()
-        .context(format!("Failed to look up host for {target}"))
+
+    anyhow::bail!("Failed to connect to any resolved address for {target}");
 }
 
 #[inline]

@@ -16,10 +16,13 @@ use std::{
 };
 use tokio::{net::TcpStream, time::timeout};
 use tokio_tungstenite::{
-    connect_async, tungstenite::protocol::Message as WsMessage, MaybeTlsStream, WebSocketStream,
+    client_async_tls_with_config, tungstenite::protocol::Message as WsMessage, MaybeTlsStream, WebSocketStream,
 };
-use tungstenite::client::IntoClientRequest;
+//use tungstenite::client::IntoClientRequest;
 use tungstenite::protocol::Role;
+
+use url::Url;
+use tokio::net::lookup_host;
 
 pub struct WsFramedStream {
     stream: WebSocketStream<MaybeTlsStream<TcpStream>>,
@@ -35,34 +38,98 @@ impl WsFramedStream {
         _proxy_conf: Option<&Socks5Server>,
         ms_timeout: u64,
     ) -> ResultType<Self> {
-        let url_str = url.as_ref();
+        //let url_str = url.as_ref();
 
         // to-do: websocket proxy.
 
-        let request = url_str
-            .into_client_request()
+        //let request = url_str
+        //    .into_client_request()
+        //    .map_err(|e| Error::new(ErrorKind::Other, e))?;
+
+        //let (stream, _) =
+        //    timeout(Duration::from_millis(ms_timeout), connect_async(request)).await??;
+
+        //let addr = match stream.get_ref() {
+        //    MaybeTlsStream::Plain(tcp) => tcp.peer_addr()?,
+        //    #[cfg(any(target_os = "macos", target_os = "windows"))]
+        //    MaybeTlsStream::NativeTls(tls) => tls.get_ref().get_ref().get_ref().peer_addr()?,
+        //    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+        //    MaybeTlsStream::Rustls(tls) => tls.get_ref().0.peer_addr()?,
+        //    _ => return Err(Error::new(ErrorKind::Other, "Unsupported stream type").into()),
+        //};
+
+        //let ws = Self {
+        //    stream,
+        //    addr,
+        //    encrypt: None,
+        //    send_timeout: ms_timeout,
+        //};
+
+        //Ok(ws)
+
+        let url_str = url.as_ref();
+        let url_parsed = Url::parse(url_str)
             .map_err(|e| Error::new(ErrorKind::Other, e))?;
 
-        let (stream, _) =
-            timeout(Duration::from_millis(ms_timeout), connect_async(request)).await??;
+        let host = url_parsed.host_str()
+            .ok_or_else(|| Error::new(ErrorKind::Other, "invalid host"))?;
+        let port = url_parsed.port_or_known_default()
+            .ok_or_else(|| Error::new(ErrorKind::Other, "invalid port"))?;
 
-        let addr = match stream.get_ref() {
-            MaybeTlsStream::Plain(tcp) => tcp.peer_addr()?,
-            #[cfg(any(target_os = "macos", target_os = "windows"))]
-            MaybeTlsStream::NativeTls(tls) => tls.get_ref().get_ref().get_ref().peer_addr()?,
-            #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-            MaybeTlsStream::Rustls(tls) => tls.get_ref().0.peer_addr()?,
-            _ => return Err(Error::new(ErrorKind::Other, "Unsupported stream type").into()),
-        };
+        // DNS 解析所有 IP
+        let addrs: Vec<SocketAddr> = lookup_host((host, port)).await?.collect();
+        if addrs.is_empty() {
+            return Err(Error::new(ErrorKind::Other, "no IPs found").into());
+        }
 
-        let ws = Self {
-            stream,
-            addr,
-            encrypt: None,
-            send_timeout: ms_timeout,
-        };
+        // 按 IPv4 优先排序
+        let mut addrs_sorted: Vec<SocketAddr> = addrs.iter()
+            .filter(|a| a.is_ipv4())
+            .cloned()
+            .collect();
 
-        Ok(ws)
+        addrs_sorted.extend(
+            addrs.iter()
+                 .filter(|a| a.is_ipv6())
+                 .cloned()
+        );
+
+        // 顺序尝试每个 IP
+        for ip in addrs_sorted {
+            match timeout(Duration::from_millis(ms_timeout), TcpStream::connect(ip)).await {
+                Ok(Ok(tcp)) => {
+                    // TCP 成功，尝试建立 WebSocket，使用默认 TLS 配置
+                    match client_async_tls_with_config(
+                        url_str,
+                        tcp,
+                        None,  // headers 可以自定义，这里暂时 None
+                        None   // connector 为 None，使用默认 TLS
+                    ).await {
+                        Ok((ws_stream, _)) => {
+                            let addr = match ws_stream.get_ref() {
+                                MaybeTlsStream::Plain(tcp) => tcp.peer_addr()?,
+                                #[cfg(any(target_os = "macos", target_os = "windows"))]
+                                MaybeTlsStream::NativeTls(tls) => tls.get_ref().get_ref().get_ref().peer_addr()?,
+                                #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+                                MaybeTlsStream::Rustls(tls) => tls.get_ref().0.peer_addr()?,
+                                _ => return Err(Error::new(ErrorKind::Other, "Unsupported stream type").into()),
+                            };
+
+                            return Ok(Self {
+                                stream: ws_stream,
+                                addr,
+                                encrypt: None,
+                                send_timeout: ms_timeout,
+                            });
+                        }
+                        Err(_) => continue, // WebSocket 建立失败，尝试下一个 IP
+                    }
+                }
+                _ => continue, // TCP 连接失败或超时，尝试下一个 IP
+            }
+        }
+
+        Err(Error::new(ErrorKind::TimedOut, "all IPs failed").into())
     }
 
     #[inline]
