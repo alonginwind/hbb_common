@@ -19,10 +19,10 @@ use std::{
     sync::Arc,
     time::Duration,
 };
-use tokio::{net::TcpStream, time::timeout};
+use tokio::{net::TcpStream, time::timeout, net::lookup_host};
 use tokio_native_tls::native_tls::TlsConnector;
 use tokio_tungstenite::{
-    connect_async_tls_with_config, tungstenite::protocol::Message as WsMessage, Connector,
+    client_async_tls_with_config, tungstenite::protocol::Message as WsMessage, Connector,
     MaybeTlsStream, WebSocketStream,
 };
 use tungstenite::client::IntoClientRequest;
@@ -69,21 +69,44 @@ impl WsFramedStream {
         url: &str,
         ms_timeout: u64,
     ) -> ResultType<WebSocketStream<MaybeTlsStream<TcpStream>>> {
-        // to-do: websocket proxy.
+        let url_parsed = url::Url::parse(url)
+            .map_err(|e| Error::new(ErrorKind::Other, e))?;
+
+        let host = url_parsed.host_str()
+            .ok_or_else(|| Error::new(ErrorKind::Other, "invalid host"))?;
+        let port = url_parsed.port_or_known_default()
+            .ok_or_else(|| Error::new(ErrorKind::Other, "invalid port"))?;
+
+        // Resolve all IP addresses for the host
+        let mut addrs: Vec<SocketAddr> = lookup_host((host, port)).await?.collect();
+        if addrs.is_empty() {
+            return Err(Error::new(ErrorKind::Other, "no IPs found").into());
+        }
+        // Sort addresses: IPv4 first, then IPv6
+        addrs.sort_by_key(|addr| if addr.is_ipv4() { 0 } else { 1 });
 
         let tls_type = get_cached_tls_type(url);
         let is_tls_type_cached = tls_type.is_some();
         let tls_type = tls_type.unwrap_or(TlsType::Rustls);
         let danger_accept_invalid_cert = get_cached_tls_accept_invalid_cert(&url);
-        Self::try_connect(
-            url,
-            ms_timeout,
-            tls_type,
-            is_tls_type_cached,
-            danger_accept_invalid_cert,
-            danger_accept_invalid_cert,
-        )
-        .await
+
+        // Try each IP sequentially
+        for addr in addrs {
+            if let Ok(ws) = Self::try_connect(
+                url,
+                ms_timeout,
+                tls_type,
+                is_tls_type_cached,
+                danger_accept_invalid_cert,
+                danger_accept_invalid_cert,
+                addr,
+            )
+            .await {
+                return Ok(ws);
+            }
+        }
+
+        Err(Error::new(ErrorKind::TimedOut, "all IPs failed").into())
     }
 
     #[async_recursion]
@@ -94,17 +117,21 @@ impl WsFramedStream {
         is_tls_type_cached: bool,
         danger_accept_invalid_cert: Option<bool>,
         original_danger_accept_invalid_certs: Option<bool>,
+        addr: SocketAddr,
     ) -> ResultType<WebSocketStream<MaybeTlsStream<TcpStream>>> {
         let ws_config = None;
-        let disable_nagle = false;
         let request = url
             .into_client_request()
             .map_err(|e| Error::new(ErrorKind::Other, e))?;
         let connector =
             Self::get_connector(&tls_type, danger_accept_invalid_cert.unwrap_or(false))?;
+
+        // Establish TCP connection
+        let tcp = timeout(Duration::from_millis(ms_timeout), TcpStream::connect(addr)).await??;
+
         match timeout(
             Duration::from_millis(ms_timeout),
-            connect_async_tls_with_config(request, ws_config, disable_nagle, connector),
+            client_async_tls_with_config(request, tcp, ws_config, connector),
         )
         .await?
         {
@@ -126,6 +153,7 @@ impl WsFramedStream {
                         is_tls_type_cached,
                         Some(true),
                         original_danger_accept_invalid_certs,
+                        addr,
                     )
                     .await
                 }
@@ -142,6 +170,7 @@ impl WsFramedStream {
                         is_tls_type_cached,
                         original_danger_accept_invalid_certs,
                         original_danger_accept_invalid_certs,
+                        addr,
                     )
                     .await
                 }
@@ -158,6 +187,7 @@ impl WsFramedStream {
                         is_tls_type_cached,
                         Some(true),
                         original_danger_accept_invalid_certs,
+                        addr,
                     )
                     .await
                 }
