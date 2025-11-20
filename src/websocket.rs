@@ -515,7 +515,7 @@ pub fn check_ws(endpoint: &str) -> String {
         (format!("{}:{}", endpoint_host, dst_port), "ws")
     } else {
         let domain_path = if relay { "/ws/relay" } else { "/ws/id" };
-        let api_server = Config::get_option("api-server");
+        let api_server = Config::get_api_server();
         let api_port = url::Url::parse(&api_server)
             .ok()
             .and_then(|u| u.port())
