@@ -957,6 +957,70 @@ impl Config {
         return RENDEZVOUS_SERVERS.iter().map(|x| x.to_string()).collect();
     }
 
+    pub fn get_api_server() ->String {
+        let mut api_server = Self::get_option("api-server");
+        if api_server.is_empty() {
+            return api_server;
+        }
+        static APP_START: std::sync::Once = std::sync::Once::new();
+        APP_START.call_once(|| {
+            Self::set_option("api-server-real".to_string(), "".to_string());
+        });
+        let mut s = Self::get_option("api-server-real");
+        if s.is_empty() {
+            if api_server.ends_with('/') {
+                api_server.pop();
+            }
+            if api_server.ends_with(|c: char| c.is_ascii_digit()) {
+                s = api_server;
+            } else {
+                #[cfg(not(test))]
+                {
+                    let api_server_ = api_server + "/";
+                    let mut api_server_real = Self::get_redirected_url_sync(api_server_.as_str());
+                    if api_server_real.ends_with('/') {
+                        api_server_real.pop();
+                    }
+                    s = api_server_real;
+                }
+                #[cfg(test)]
+                {
+                    s = api_server;
+                }
+            }
+            Self::set_option("api-server-real".to_string(), s.clone());
+        }
+        s
+    }
+
+    fn get_redirected_url_sync(api_server: &str) -> String {
+        let client_ = match reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        {
+            Ok(c) => c,
+            Err(_) => return api_server.to_string(),
+        };
+
+        let resp = match client_.get(api_server).send() {
+            Ok(r) => r,
+            Err(_) => return api_server.to_string(),
+        };
+
+        if resp.status().is_redirection() {
+            if let Some(location) = resp.headers().get(reqwest::header::LOCATION) {
+                if let Ok(loc_str) = location.to_str() {
+                    if loc_str.starts_with("http://") || loc_str.starts_with("https://") {
+                        return loc_str.to_string();
+                    }
+                }
+            }
+        }
+
+        api_server.to_string()
+    }
+
     pub fn reset_online() {
         *ONLINE.lock().unwrap() = Default::default();
     }
