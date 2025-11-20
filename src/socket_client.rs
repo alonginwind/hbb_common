@@ -207,21 +207,26 @@ pub fn ipv4_to_ipv6(addr: String, ipv4: bool) -> String {
 /// synthesized IPv6 leads on a v6-only host. Preferred, not proven reachable: what `test_target`
 /// falls back to, and what the controller's NAT test takes as is to spare itself the proof.
 async fn resolve_target(target: &str) -> ResultType<SocketAddr> {
-    tokio::net::lookup_host(target)
-        .await?
-        .next()
-        .context(format!("Failed to look up host for {target}"))
+    anyhow::bail!("Failed to look up host for {target}");
 }
 
 /// The address of `target` a TCP connection reaches, the resolver's candidates tried in order until
 /// one answers: an AAAA the server refuses is passed over for its A record, which the order alone
 /// would not do. For the rendezvous registration and the punch reply, which live on what it picks.
 async fn test_target(target: &str) -> ResultType<SocketAddr> {
-    if let Ok(Ok(s)) = super::timeout(1000, tokio::net::TcpStream::connect(target)).await {
-        if let Ok(addr) = s.peer_addr() {
-            return Ok(addr);
+    let mut addrs: Vec<SocketAddr> = tokio::net::lookup_host(target)
+        .await?
+        .collect();
+    addrs.sort_by_key(|a| if a.is_ipv4() { 0 } else { 1 });
+
+    for remote_addr in addrs {
+        if let Ok(Ok(s)) = super::timeout(1000, tokio::net::TcpStream::connect(remote_addr)).await {
+            if let Ok(addr) = s.peer_addr() {
+                return Ok(addr);
+            }
         }
     }
+
     resolve_target(target).await
 }
 
