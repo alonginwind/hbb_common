@@ -511,24 +511,23 @@ pub fn check_ws(endpoint: &str) -> String {
         (true, endpoint_port + 2)
     };
 
-    let (address, is_domain) = if crate::is_ip_str(endpoint) {
-        (format!("{}:{}", endpoint_host, dst_port), false)
+    let (address, protocol) = if crate::is_ip_str(endpoint) {
+        (format!("{}:{}", endpoint_host, dst_port), "ws")
     } else {
         let domain_path = if relay { "/ws/relay" } else { "/ws/id" };
-        let port = websocket_port(&endpoint_host, &relay_server)
+        let api_server = Config::get_option("api-server");
+        let api_port = url::Url::parse(&api_server)
+            .ok()
+            .and_then(|u| u.port())
+            .unwrap_or_default();
+        let port = websocket_port(&endpoint_host, &relay_server, api_port)
             .map(|port| format!(":{}", port))
             .unwrap_or_default();
-        (format!("{}{}{}", endpoint_host, port, domain_path), true)
-    };
-    let protocol = if is_domain {
-        let api_server = Config::get_option("api-server");
         if api_server.starts_with("https") {
-            "wss"
+            (format!("{}{}{}", endpoint_host, port, domain_path), "wss")
         } else {
-            "ws"
+            (format!("{}{}{}", endpoint_host, port, domain_path), "ws")
         }
-    } else {
-        "ws"
     };
     format!("{}://{}", protocol, address)
 }
@@ -536,9 +535,12 @@ pub fn check_ws(endpoint: &str) -> String {
 /// Port of the reverse proxy serving `/ws/id` and `/ws/relay` on this client's own servers, for
 /// when it cannot listen on the scheme's default port. Any other host, such as a peer's server or
 /// a relay on another machine, keeps the default port. IP endpoints never get here.
-fn websocket_port(host: &str, relay_server: &str) -> Option<u16> {
+fn websocket_port(host: &str, relay_server: &str, api_port: u16) -> Option<u16> {
     let port = Config::get_option(OPTION_WEBSOCKET_PORT);
     if port.is_empty() {
+        if api_port > 0 {
+            return Some(api_port);
+        }
         return None;
     }
     // Only servers this client is set up with, not the public fallback of get_rendezvous_server().
