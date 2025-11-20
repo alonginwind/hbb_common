@@ -217,9 +217,16 @@ async fn resolve_target(target: &str) -> ResultType<SocketAddr> {
 /// one answers: an AAAA the server refuses is passed over for its A record, which the order alone
 /// would not do. For the rendezvous registration and the punch reply, which live on what it picks.
 async fn test_target(target: &str) -> ResultType<SocketAddr> {
-    if let Ok(Ok(s)) = super::timeout(1000, tokio::net::TcpStream::connect(target)).await {
-        if let Ok(addr) = s.peer_addr() {
-            return Ok(addr);
+    let mut addrs: Vec<SocketAddr> = tokio::net::lookup_host(target)
+        .await?
+        .collect();
+    addrs.sort_by_key(|a| if a.is_ipv4() { 0 } else { 1 });
+
+    for remote_addr in addrs {
+        if let Ok(Ok(s)) = super::timeout(1000, tokio::net::TcpStream::connect(remote_addr)).await {
+            if let Ok(addr) = s.peer_addr() {
+                return Ok(addr);
+            }
         }
     }
     resolve_target(target).await
