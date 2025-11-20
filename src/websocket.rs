@@ -373,19 +373,27 @@ pub fn check_ws(endpoint: &str) -> String {
         (true, endpoint_port + 2)
     };
 
-    let (address, is_domain) = if crate::is_ip_str(endpoint) {
-        (format!("{}:{}", endpoint_host, dst_port), false)
-    } else {
+    let api_server = Config::get_option("api-server");
+    let address = {
         let domain_path = if relay { "/ws/relay" } else { "/ws/id" };
-        (format!("{}{}", endpoint_host, domain_path), true)
-    };
-    let protocol = if is_domain {
-        let api_server = Config::get_option("api-server");
         if api_server.starts_with("https") {
-            "wss"
+            let api_https_server = api_server[8..].to_string();
+            let ws_port = split_host_port(&api_https_server)
+                .map(|(_, p)| p)
+                .unwrap_or(443);
+            format!("{}:{}{}", endpoint_host, ws_port, domain_path)
+        } else if api_server.starts_with("http") {
+            let api_http_server = api_server[7..].to_string();
+            let ws_port = split_host_port(&api_http_server)
+                .map(|(_, p)| p)
+                .unwrap_or(80);
+            format!("{}:{}{}", endpoint_host, ws_port, domain_path)
         } else {
-            "ws"
+            format!("{}:{}", endpoint_host, dst_port)
         }
+    };
+    let protocol = if api_server.starts_with("https") {
+        "wss"
     } else {
         "ws"
     };
