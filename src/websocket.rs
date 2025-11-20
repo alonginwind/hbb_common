@@ -381,21 +381,22 @@ pub fn check_ws(endpoint: &str) -> String {
         (true, endpoint_port + 2)
     };
 
-    let (address, is_domain) = if crate::is_ip_str(endpoint) {
-        (format!("{}:{}", endpoint_host, dst_port), false)
-    } else {
+    let api_server = Config::get_option("api-server");
+    let (address, protocol) = {
         let domain_path = if relay { "/ws/relay" } else { "/ws/id" };
-        (format!("{}{}", endpoint_host, domain_path), true)
-    };
-    let protocol = if is_domain {
-        let api_server = Config::get_option("api-server");
-        if api_server.starts_with("https") {
-            "wss"
+        if api_server.starts_with("https://") {
+            let ws_port = split_host_port(&api_server[8..])
+                .map(|(_, p)| p)
+                .unwrap_or(443);
+            (format!("{}:{}{}", endpoint_host, ws_port, domain_path), "wss")
+        } else if api_server.starts_with("http://") {
+            let ws_port = split_host_port(&api_server[7..])
+                .map(|(_, p)| p)
+                .unwrap_or(80);
+            (format!("{}:{}{}", endpoint_host, ws_port, domain_path), "ws")
         } else {
-            "ws"
+            (format!("{}:{}", endpoint_host, dst_port), "ws")
         }
-    } else {
-        "ws"
     };
     format!("{}://{}", protocol, address)
 }
@@ -417,9 +418,9 @@ mod tests {
         assert_eq!(check_ws("127.0.0.1:21115"), "ws://127.0.0.1:21118");
         assert_eq!(check_ws("127.0.0.1:21116"), "ws://127.0.0.1:21118");
         assert_eq!(check_ws("127.0.0.1:21117"), "ws://127.0.0.1:21119");
-        assert_eq!(check_ws("rustdesk.com:21115"), "ws://rustdesk.com/ws/id");
-        assert_eq!(check_ws("rustdesk.com:21116"), "ws://rustdesk.com/ws/id");
-        assert_eq!(check_ws("rustdesk.com:21117"), "ws://rustdesk.com/ws/relay");
+        assert_eq!(check_ws("rustdesk.com:21115"), "ws://rustdesk.com:21118");
+        assert_eq!(check_ws("rustdesk.com:21116"), "ws://rustdesk.com:21118");
+        assert_eq!(check_ws("rustdesk.com:21117"), "ws://rustdesk.com:21119");
         // set relay-server without port
         Config::set_option("relay-server".to_string(), "127.0.0.1".to_string());
         Config::set_option(
@@ -428,34 +429,34 @@ mod tests {
         );
         assert_eq!(
             check_ws("[0:0:0:0:0:0:0:1]:21115"),
-            "ws://[0:0:0:0:0:0:0:1]:21118"
+            "wss://[0:0:0:0:0:0:0:1]:443/ws/id"
         );
         assert_eq!(
             check_ws("[0:0:0:0:0:0:0:1]:21116"),
-            "ws://[0:0:0:0:0:0:0:1]:21118"
+            "wss://[0:0:0:0:0:0:0:1]:443/ws/id"
         );
         assert_eq!(
             check_ws("[0:0:0:0:0:0:0:1]:21117"),
-            "ws://[0:0:0:0:0:0:0:1]:21119"
+            "wss://[0:0:0:0:0:0:0:1]:443/ws/relay"
         );
-        assert_eq!(check_ws("rustdesk.com:21115"), "wss://rustdesk.com/ws/id");
-        assert_eq!(check_ws("rustdesk.com:21116"), "wss://rustdesk.com/ws/id");
+        assert_eq!(check_ws("rustdesk.com:21115"), "wss://rustdesk.com:443/ws/id");
+        assert_eq!(check_ws("rustdesk.com:21116"), "wss://rustdesk.com:443/ws/id");
         assert_eq!(
             check_ws("rustdesk.com:21117"),
-            "wss://rustdesk.com/ws/relay"
+            "wss://rustdesk.com:443/ws/relay"
         );
         // set relay-server with default port
         Config::set_option("relay-server".to_string(), "127.0.0.1:21117".to_string());
-        assert_eq!(check_ws("127.0.0.1:21115"), "ws://127.0.0.1:21118");
-        assert_eq!(check_ws("127.0.0.1:21116"), "ws://127.0.0.1:21118");
-        assert_eq!(check_ws("127.0.0.1:21117"), "ws://127.0.0.1:21119");
+        assert_eq!(check_ws("127.0.0.1:21115"), "wss://127.0.0.1:443/ws/id");
+        assert_eq!(check_ws("127.0.0.1:21116"), "wss://127.0.0.1:443/ws/id");
+        assert_eq!(check_ws("127.0.0.1:21117"), "wss://127.0.0.1:443/ws/relay");
         // set relay-server with custom port
         Config::set_option("relay-server".to_string(), "127.0.0.1:34567".to_string());
-        assert_eq!(check_ws("rustdesk.com:21115"), "wss://rustdesk.com/ws/id");
-        assert_eq!(check_ws("rustdesk.com:21116"), "wss://rustdesk.com/ws/id");
+        assert_eq!(check_ws("rustdesk.com:21115"), "wss://rustdesk.com:443/ws/id");
+        assert_eq!(check_ws("rustdesk.com:21116"), "wss://rustdesk.com:443/ws/id");
         assert_eq!(
             check_ws("rustdesk.com:34567"),
-            "wss://rustdesk.com/ws/relay"
+            "wss://rustdesk.com:443/ws/relay"
         );
 
         // set custom-rendezvous-server without port
