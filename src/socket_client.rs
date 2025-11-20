@@ -204,15 +204,20 @@ pub fn ipv4_to_ipv6(addr: String, ipv4: bool) -> String {
 }
 
 async fn test_target(target: &str) -> ResultType<SocketAddr> {
-    if let Ok(Ok(s)) = super::timeout(1000, tokio::net::TcpStream::connect(target)).await {
-        if let Ok(addr) = s.peer_addr() {
-            return Ok(addr);
+    let mut addrs: Vec<SocketAddr> = tokio::net::lookup_host(target)
+        .await?
+        .collect();
+    addrs.sort_by_key(|a| if a.is_ipv4() { 0 } else { 1 });
+
+    for remote_addr in addrs {
+        if let Ok(Ok(s)) = super::timeout(1000, tokio::net::TcpStream::connect(remote_addr)).await {
+            if let Ok(addr) = s.peer_addr() {
+                return Ok(addr);
+            }
         }
     }
-    tokio::net::lookup_host(target)
-        .await?
-        .next()
-        .context(format!("Failed to look up host for {target}"))
+
+    anyhow::bail!("Failed to connect to any resolved address for {target}");
 }
 
 #[inline]

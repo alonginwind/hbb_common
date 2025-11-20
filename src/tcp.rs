@@ -86,7 +86,11 @@ impl FramedStream {
         local_addr: Option<SocketAddr>,
         ms_timeout: u64,
     ) -> ResultType<Self> {
-        for remote_addr in lookup_host(&remote_addr).await? {
+        let mut addrs: Vec<SocketAddr> = lookup_host(&remote_addr).await?.collect();
+        // Sort addresses: IPv4 first, then IPv6
+        addrs.sort_by_key(|addr| if addr.is_ipv4() { 0 } else { 1 });
+
+        for remote_addr in addrs {
             let local = if let Some(addr) = local_addr {
                 addr
             } else {
