@@ -1008,7 +1008,9 @@ impl Config {
         if resp.status().is_redirection() {
             if let Some(location) = resp.headers().get(reqwest::header::LOCATION) {
                 if let Ok(loc_str) = location.to_str() {
-                    return loc_str.to_string();
+                    if loc_str.starts_with("http://") || loc_str.starts_with("https://") {
+                        return loc_str.to_string();
+                    }
                 }
             }
         }
