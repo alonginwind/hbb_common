@@ -69,7 +69,7 @@ lazy_static::lazy_static! {
     static ref ONLINE: Mutex<HashMap<String, i64>> = Default::default();
     pub static ref PROD_RENDEZVOUS_SERVER: RwLock<String> = RwLock::new("".to_owned());
     pub static ref EXE_RENDEZVOUS_SERVER: RwLock<String> = Default::default();
-    pub static ref APP_NAME: RwLock<String> = RwLock::new("RustDesk".to_owned());
+    pub static ref APP_NAME: RwLock<String> = RwLock::new("MiraConn".to_owned());
     static ref KEY_PAIR: Mutex<Option<KeyPair>> = Default::default();
     static ref USER_DEFAULT_CONFIG: RwLock<(UserDefaultConfig, Instant)> = RwLock::new((UserDefaultConfig::load(), Instant::now()));
     pub static ref NEW_STORED_PEER_CONFIG: Mutex<HashSet<String>> = Default::default();
@@ -87,6 +87,13 @@ lazy_static::lazy_static! {
     pub static ref BUILTIN_SETTINGS: RwLock<HashMap<String, String>> = Default::default();
 }
 
+#[cfg(not(any(target_os = "android")))]
+lazy_static::lazy_static! {
+    /// Real app name for config/data paths on non-android platforms.
+    /// Kept as "RustDesk" for backward compatibility with existing installations.
+    pub static ref APP_NAME_REAL: RwLock<String> = RwLock::new("RustDesk".to_owned());
+}
+
 #[cfg(target_os = "android")]
 lazy_static::lazy_static! {
     pub static ref ANDROID_RUSTLS_PLATFORM_VERIFIER_INITIALIZED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -101,16 +108,16 @@ lazy_static::lazy_static! {
     pub static ref APP_HOME_DIR: RwLock<String> = Default::default();
 }
 
-pub const LINK_DOCS_HOME: &str = "https://rustdesk.com/docs/en/";
-pub const LINK_DOCS_X11_REQUIRED: &str = "https://rustdesk.com/docs/en/manual/linux/#x11-required";
+pub const LINK_DOCS_HOME: &str = "https://miraconn.com/docs/en/";
+pub const LINK_DOCS_X11_REQUIRED: &str = "https://miraconn.com/docs/en/manual/linux/#x11-required";
 pub const LINK_HEADLESS_LINUX_SUPPORT: &str =
-    "https://github.com/rustdesk/rustdesk/wiki/Headless-Linux-Support";
+    "https://github.com/miraconn/miraconn/wiki/Headless-Linux-Support";
 
 lazy_static::lazy_static! {
     pub static ref HELPER_URL: HashMap<&'static str, &'static str> = HashMap::from([
-        ("rustdesk docs home", LINK_DOCS_HOME),
-        ("rustdesk docs x11-required", LINK_DOCS_X11_REQUIRED),
-        ("rustdesk x11 headless", LINK_HEADLESS_LINUX_SUPPORT),
+        ("miraconn docs home", LINK_DOCS_HOME),
+        ("miraconn docs x11-required", LINK_DOCS_X11_REQUIRED),
+        ("miraconn x11 headless", LINK_HEADLESS_LINUX_SUPPORT),
         ]);
 }
 
@@ -144,7 +151,7 @@ pub fn is_service_ipc_postfix(postfix: &str) -> bool {
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 #[inline]
 fn ipc_parent_dir_for_uid(uid: u32, postfix: &str) -> String {
-    let app_name = APP_NAME.read().unwrap().clone();
+    let app_name = APP_NAME_REAL.read().unwrap().clone();
     if is_service_ipc_postfix(postfix) {
         format!("/tmp/{app_name}-service")
     } else {
@@ -744,6 +751,9 @@ impl Config {
     }
 
     fn file_(suffix: &str) -> PathBuf {
+        #[cfg(not(any(target_os = "android")))]
+        let name = format!("{}{}", *APP_NAME_REAL.read().unwrap(), suffix);
+        #[cfg(any(target_os = "android"))]
         let name = format!("{}{}", *APP_NAME.read().unwrap(), suffix);
         Config::with_extension(Self::path(name))
     }
@@ -799,7 +809,7 @@ impl Config {
             let org = ORG.read().unwrap().clone();
             // /var/root for root
             if let Some(project) =
-                directories_next::ProjectDirs::from("", &org, &APP_NAME.read().unwrap())
+                directories_next::ProjectDirs::from("", &org, &APP_NAME_REAL.read().unwrap())
             {
                 let mut path = patch(project.config_dir().to_path_buf());
                 path.push(p);
@@ -820,14 +830,14 @@ impl Config {
         #[cfg(target_os = "macos")]
         {
             if let Some(path) = dirs_next::home_dir().as_mut() {
-                path.push(format!("Library/Logs/{}", *APP_NAME.read().unwrap()));
+                path.push(format!("Library/Logs/{}", *APP_NAME_REAL.read().unwrap()));
                 return path.clone();
             }
         }
         #[cfg(target_os = "linux")]
         {
             let mut path = Self::get_home();
-            path.push(format!(".local/share/logs/{}", *APP_NAME.read().unwrap()));
+            path.push(format!(".local/share/logs/{}", *APP_NAME_REAL.read().unwrap()));
             std::fs::create_dir_all(&path).ok();
             return path;
         }
@@ -854,7 +864,7 @@ impl Config {
             // https://docs.microsoft.com/en-us/windows/win32/ipc/pipe-names
             format!(
                 "\\\\.\\pipe\\{}\\query{}",
-                *APP_NAME.read().unwrap(),
+                *APP_NAME_REAL.read().unwrap(),
                 postfix
             )
         }
@@ -871,7 +881,7 @@ impl Config {
                 ipc_parent_dir_for_uid(uid, postfix).into()
             };
             #[cfg(not(any(target_os = "android", target_os = "linux", target_os = "macos")))]
-            let mut path: PathBuf = format!("/tmp/{}", *APP_NAME.read().unwrap()).into();
+            let mut path: PathBuf = format!("/tmp/{}", *APP_NAME_REAL.read().unwrap()).into();
             // Android stores IPC sockets under app-controlled directories. Create the IPC parent
             // dir and enforce the expected mode here. On other Unix platforms, `ipc_path()` is
             // intentionally side-effect free (no mkdir/chmod); callers should enforce directory and
@@ -2599,6 +2609,9 @@ pub struct Ab {
 
 impl Ab {
     fn path() -> PathBuf {
+        #[cfg(not(any(target_os = "android")))]
+        let filename = format!("{}_ab", APP_NAME_REAL.read().unwrap().clone());
+        #[cfg(any(target_os = "android"))]
         let filename = format!("{}_ab", APP_NAME.read().unwrap().clone());
         Config::path(filename)
     }
@@ -2729,6 +2742,9 @@ pub struct Group {
 
 impl Group {
     fn path() -> PathBuf {
+        #[cfg(not(any(target_os = "android")))]
+        let filename = format!("{}_group", APP_NAME_REAL.read().unwrap().clone());
+        #[cfg(any(target_os = "android"))]
         let filename = format!("{}_group", APP_NAME.read().unwrap().clone());
         Config::path(filename)
     }

@@ -489,8 +489,8 @@ pub struct VersionCheckResponse {
     pub url: String,
 }
 
-pub const VER_TYPE_RUSTDESK_CLIENT: &str = "rustdesk-client";
-pub const VER_TYPE_RUSTDESK_SERVER: &str = "rustdesk-server";
+pub const VER_TYPE_RUSTDESK_CLIENT: &str = "miraconn-client";
+pub const VER_TYPE_RUSTDESK_SERVER: &str = "miraconn-server";
 
 pub fn version_check_request(typ: String) -> (VersionCheckRequest, String) {
     let check_url = Config::get_api_server() + "/latest";
